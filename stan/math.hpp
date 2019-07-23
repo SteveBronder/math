@@ -3,4 +3,7 @@
 
 #include <stan/math/rev/mat.hpp>
 
+// tools for Laplace approximation
+#include <stan/math/laplace/laplace.hpp>
+
 #endif
