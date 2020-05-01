@@ -10,7 +10,7 @@ namespace stan {
 namespace math {
 
 /**
- * Returns a Matrix with values added along the main diagonal
+ * Returns a Matrix with values added along the main diagonal.
  *
  * @tparam T_m type of element in Eigen::Matrix
  * @tparam T_a Type of element(s) to add along the diagonal
