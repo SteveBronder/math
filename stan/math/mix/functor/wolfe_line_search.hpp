@@ -290,34 +290,62 @@ inline auto check_wolfe_curve(double dir_deriv_next, double dir_deriv_init,
          <= (opt.line_search.c2 * std::abs(dir_deriv_init));
 }
 
-
-// TODO: These need to show passed but warning went off for convergence
-enum class wolfe_return {
-  PASS,         // Success
-  FAIL,         // Armijo Wolfe conditions failed
-  ARMIJO_PASS,  // Armijo condition passed but Wolfe failed
-  GRAD_CONV,     // Approximate gradient converged
-  GRAD_OBJ_CONV, // Approximate gradient and objective converged
-  OBJ_CONV,   // Objective converged
-  ALPHA_FAIL // Alpha high shrank below tolerance
+enum class WolfeReturn : uint8_t {
+  // both conditions true
+  Wolfe,
+  // Armijo true, curvature false
+  Armijo,
+  // |phi'| small
+  ConvergedGradient,
+  // |phi - phi0| small
+  ConvergedObjective,
+  // |phi - phi0| and |phi'| small
+  ConvergedObjectiveAndGradient,
+  // high and low became too small
+  IntervalTooSmall,
+  // alpha < min_alpha
+  StepTooSmall,
+  // max iters reached
+  ReachedMaxStep,
+  // failed to find a step
+  NumericalIssue,
+  // All other failures
+  Fail
 };
 
-inline auto wolfe_return_str(wolfe_return r) {
-  switch (r) {
-  case wolfe_return::PASS:
-    return "PASS";
-  case wolfe_return::ARMIJO_PASS:
-    return "ARMIJO_PASS";
-  case wolfe_return::FAIL:
-    return "FAIL";
-  case wolfe_return::GRAD_CONV:
-    return "GRAD_CONV";
-  case wolfe_return::GRAD_OBJ_CONV:
-    return "GRAD_OBJ_CONV";
-  case wolfe_return::OBJ_CONV:
-    return "OBJ_CONV";
-  case wolfe_return::ALPHA_FAIL:
-    return "ALPHA_FAIL";
+struct WolfeStatus {
+  // End alpha value
+  double alpha{0.0};
+  // Objective and derivative at end
+  double obj{0.0};
+  double d_obj{0.0};
+  // total updates/evaluations
+  int num_evals{0};
+  int num_backtracks{0};
+  WolfeReturn stop{WolfeReturn::Fail};
+};
+inline auto wolfe_status_str(WolfeStatus s) {
+  switch (s.stop) {
+  case WolfeReturn::Wolfe:
+    return "Wolfe";
+  case WolfeReturn::Armijo:
+    return "Armijo";
+  case WolfeReturn::ConvergedGradient:
+    return "ConvergedGradient";
+  case WolfeReturn::ConvergedObjective:
+    return "ConvergedObjective";
+  case WolfeReturn::ConvergedObjectiveAndGradient:
+    return "ConvergedObjectiveAndGradient";
+  case WolfeReturn::IntervalTooSmall:
+    return "IntervalTooSmall";
+  case WolfeReturn::StepTooSmall:
+    return "StepTooSmall";
+  case WolfeReturn::ReachedMaxStep:
+    return "ReachedMaxStep";
+  case WolfeReturn::NumericalIssue:
+    return "NumericalIssue";
+  case WolfeReturn::Fail:
+    return "Fail";
   default:
     return "UNKNOWN";
   }
@@ -392,7 +420,7 @@ inline auto wolfe_return_str(wolfe_return r) {
  *`a`.
  * @param[in] covariance Symmetric positive‑definite $\Sigma$ converting *a* to
  *theta
- * @param[in] llzfif _args Extra arguments forwarded to `ll_fun` and
+ * @param[in] ll_args Extra arguments forwarded to `ll_fun` and
  *`theta_grad`
  * @param[in] opt Line‑search constants (`c1`, `c2`, etc.)
  * @param[in,out] msgs Optional diagnostics stream.  May be `nullptr` to
@@ -409,7 +437,7 @@ inline auto wolfe_return_str(wolfe_return r) {
  */
 template <typename F, class Obj, class Grad, typename LLArgs, typename Stream,
           typename Options>
-inline std::pair<wolfe_return, int> wolfe_line_search(
+inline WolfeStatus wolfe_line_search(
     Eigen::VectorXd& theta, double& obj_init, double& alpha_init,
     Eigen::VectorXd& theta_grad, Eigen::VectorXd& a,
     const Eigen::VectorXd& a_prev, F&& ll_fun, Obj&& obj_fun, Grad&& grad_fun,
@@ -420,9 +448,10 @@ inline std::pair<wolfe_return, int> wolfe_line_search(
     double obj;   // obj
     double dir;   // directional derivative
   };
+  WolfeStatus status;
   Eigen::VectorXd p = a - a_prev;
+  const Eigen::VectorXd sigma_p = covariance * p;
   double dir_deriv_init = grad_fun(a_prev, theta, theta_grad).dot(p);
-  Eval low{0.0, obj_init, dir_deriv_init};
 
   auto armijo_ok = [&](const Eval& eval) -> bool {
     return check_armijo(eval.obj, obj_init, eval.alpha, dir_deriv_init, opt);
@@ -430,14 +459,15 @@ inline std::pair<wolfe_return, int> wolfe_line_search(
   auto wolfe_ok = [&](const Eval& eval) -> bool {
     return check_wolfe_curve(eval.dir, dir_deriv_init, opt);
   };
-  int total_updates = 0;
+  Eigen::VectorXd theta_grad_try = theta_grad;
   auto update_step
-      = [&p, &a_prev, &covariance, &ll_fun, &ll_args, &obj_fun, &grad_fun, msgs,
-         &total_updates](auto& a_in, auto& theta_in, auto& theta_grad_in,
-                         auto& eval_in) {
-          total_updates++;
-          a_in = a_prev + eval_in.alpha * p;
-          theta_in = covariance * a_in;
+      = [&p, &status, &a_prev, &covariance, &theta, &sigma_p, &ll_fun,
+        &ll_args, &obj_fun, &grad_fun, msgs](
+          auto& a_in, auto& theta_in, auto& theta_grad_in,
+          auto& eval_in) mutable {
+          status.num_evals++;
+          theta_in.noalias() = theta + eval_in.alpha * sigma_p;
+          a_in.noalias()     = a_prev + eval_in.alpha * p;
           theta_grad_in
               = laplace_likelihood::theta_grad(ll_fun, theta_in, ll_args, msgs);
           eval_in.obj = obj_fun(a_in, theta_in);
@@ -448,18 +478,21 @@ inline std::pair<wolfe_return, int> wolfe_line_search(
   Eigen::VectorXd a_try(a_prev.size());
   Eigen::VectorXd theta_try(a_prev.size());
   Eval high{alpha_start, obj_init, dir_deriv_init};
-  update_step(a_try, theta_try, theta_grad, high);
+  update_step(a_try, theta_try, theta_grad_try, high);
+  Eval low{0.0, obj_init, dir_deriv_init};
   Eval best = low;  // keep the best Armijo-OK in case strong-Wolfe fails
   {
     while (!(std::isfinite(high.obj) && theta_try.allFinite())) {
+      status.num_backtracks++;
       high.alpha *= 0.5;
       if (high.alpha < opt.line_search.min_alpha) {
         debug::print("Exit on precheck numerical trouble", 1);
-        debug::print("total_updates", total_updates);
+        debug::print("total_updates", status.num_evals);
         alpha_init = high.alpha;
-        return std::pair{wolfe_return::FAIL, total_updates};
+        status.stop = WolfeReturn::StepTooSmall;
+        return status;
       }
-      update_step(a_try, theta_try, theta_grad, high);
+      update_step(a_try, theta_try, theta_grad_try, high);
     }
     debug::print("First precheck: ", 1, "high.alpha: ", high.alpha,
                  "high.obj:   ", high.obj, "deriv_high: ", high.dir,
@@ -470,10 +503,15 @@ inline std::pair<wolfe_return, int> wolfe_line_search(
         debug::print("Exit on first precheck", 1);
         a.swap(a_try);
         theta.swap(theta_try);
+        theta_grad.swap(theta_grad_try);
         obj_init = high.obj;
         alpha_init = high.alpha;
-        debug::print("total_updates", total_updates);
-        return std::pair{wolfe_return::PASS, total_updates};
+        debug::print("total_updates", status.num_evals);
+        status.stop = WolfeReturn::Wolfe;
+        status.alpha = high.alpha;
+        status.obj = high.obj;
+        status.d_obj = high.dir;
+        return status;
       } else {
         if (best.obj < high.obj) {
           best = high;
@@ -493,17 +531,18 @@ inline std::pair<wolfe_return, int> wolfe_line_search(
 
   /**
    * For each case
-   * armijo | wolfe | sign(g) | Action
+   * Case|armijo|wolfe|sign(g)| Action
    * -------+-------+---------+---------------------------------------------
-   * [1]  T     |   T   |         | Accept α (PASS: strong-Wolfe satisfied)
-   * [2]  T     |   F   |   > 0   | Promote left: set α_low ← α, keep best, expand α (e.g. α ← scale_up·α)
-   * [3]  T     |   F   |   < 0   | Set α_high ← α, stop expanding → zoom
-   * [4]  F     |   T   |         | Set α_high ← α, stop expanding → zoom
-   * [5]  F     |   F   |         | Set α_high ← α, stop expanding → zoom
+   * [1] |  T   |  T  |       | Accept alpha (PASS: strong-Wolfe satisfied)
+   * [2] |  T   |  F  |  > 0  | Set alpha_low ← alpha, keep best, expand alpha
+   * [3] |  T   |  F  |  < 0  | Set alpha_high ← alpha, stop expanding → zoom
+   * [4] |  F   |  T  |       | Set alpha_high ← alpha, stop expanding → zoom
+   * [5] |  F   |  F  |       | Set alpha_high ← alpha, stop expanding → zoom
    **/
   while (!found_right && high.alpha < opt.line_search.max_alpha) {
+    status.num_backtracks++;
     // 1. Evaluate f(α) and g(α)
-    update_step(a_try, theta_try, theta_grad, high);
+    update_step(a_try, theta_try, theta_grad_try, high);
     debug::print("First While", 1, "Second Iter:       ", loop_iter++,
                  "high.alpha: ", high.alpha, "high.obj:   ", high.obj,
                  "deriv_high: ", high.dir, "deriv_init: ", dir_deriv_init,
@@ -522,27 +561,30 @@ inline std::pair<wolfe_return, int> wolfe_line_search(
       if (wolfe_ok(high)) {
         a.swap(a_try);
         theta.swap(theta_try);
+        theta_grad.swap(theta_grad_try);
         obj_init = high.obj;
         alpha_init = high.alpha;
         debug::print("Exit on first while", 1);
-        debug::print("total_updates", total_updates);
-        return std::pair{wolfe_return::PASS, total_updates};
+        debug::print("total_updates", status.num_evals);
+        status.stop = WolfeReturn::Wolfe;
+        status.alpha = high.alpha;
+        status.obj = high.obj;
+        status.d_obj = high.dir;
+        return status;
       } else {
         if (best.obj < high.obj) {
           best = high;
         }
         // [2]
-        if (std::signbit(high.dir)) {
+        if (high.dir > 0) {
           low = high;
-          high.alpha *= opt.line_search.scale_up;
+          high.alpha = std::min(high.alpha * opt.line_search.scale_up,
+                            opt.line_search.max_alpha);
           continue;
-        } else {
-          // [3]
-          found_right = true;
         }
       }
     }
-    // [4,5]
+    // [3, 4, 5]
     found_right = true;
     break;
   }
@@ -552,36 +594,50 @@ inline std::pair<wolfe_return, int> wolfe_line_search(
       std::abs(high.obj - obj_init) <= obj_tol
           && high.alpha < 1e-8) {                // tiny gain
       if (best.obj != low.obj && armijo_ok(best)) {
-       update_step(a_try, theta_try, theta_grad, high);
+       update_step(a_try, theta_try, theta_grad_try, best);
        a.swap(a_try);
        theta.swap(theta_try);
+       theta_grad.swap(theta_grad_try);
        obj_init = best.obj;
        alpha_init = best.alpha;
+       // Need to break these up
+       status.stop = WolfeReturn::Armijo;
+       status.alpha = best.alpha;
+       status.obj = best.obj;
+       status.d_obj = best.dir;
+       return status;
       }
-      debug::print("total_updates", total_updates);
+      debug::print("total_updates", status.num_evals);
+      status.alpha = high.alpha;
+      status.obj = high.obj;
+      status.d_obj = high.dir;
       if (std::abs(high.dir) <= grad_tol &&  // tiny slope
           std::abs(high.obj - obj_init) <= obj_tol) {
         debug::print("Exit on grad_tol and obj_tol", 1);
-        return std::pair{wolfe_return::GRAD_OBJ_CONV, total_updates};
+        status.stop = WolfeReturn::ConvergedObjectiveAndGradient;
+        return status;
       } else if (std::abs(high.dir) <= grad_tol) {
         debug::print("Exit on grad_tol", 1);
-        return std::pair{wolfe_return::GRAD_CONV, total_updates};
+        status.stop = WolfeReturn::ConvergedGradient;
+        return status;
       } else if (std::abs(high.obj - obj_init) <= obj_tol) {
         debug::print("Exit on obj_tol", 1);
-        return std::pair{wolfe_return::OBJ_CONV, total_updates};
+        status.stop = WolfeReturn::ConvergedObjective;
+        return status;
       } else {
         debug::print("Exit on alpha failure", 1);
-        return std::pair{wolfe_return::ALPHA_FAIL, total_updates};
+        status.stop = WolfeReturn::StepTooSmall;
+        return status;
       }
     }
-    return std::pair{wolfe_return::PASS, total_updates};
+    return status;
 
   };
   auto check_b = check_bounds();
-  if (check_b.first != wolfe_return::PASS) {
+  if (check_b.stop != WolfeReturn::Fail) {
     return check_b;
   }
-  update_step(a_try, theta_try, theta_grad, high);
+  update_step(a_try, theta_try, theta_grad_try, high);
 
   debug::print("_______End First While: ", 1, "high.alpha: ", high.alpha,
                "high.obj:   ", high.obj, "high.dir: ", high.dir,
@@ -589,9 +645,10 @@ inline std::pair<wolfe_return, int> wolfe_line_search(
   loop_iter = 0;
   Eval mid{low};
   while (high.alpha - low.alpha > opt.line_search.min_alpha) {
+    status.num_backtracks++;
     const double diff_alpha = high.alpha - low.alpha;
     mid.alpha = cubic_or_bisect_max(low, high, opt);
-    update_step(a_try, theta_try, theta_grad, mid);
+    update_step(a_try, theta_try, theta_grad_try, mid);
     debug::print("Cube: ", 1, "Cube Iter:           ", loop_iter++,
                  "mid.alpha:      ", mid.alpha, "mid.obj:        ", mid.obj,
                  "high.dir: ", mid.dir,
@@ -618,11 +675,16 @@ inline std::pair<wolfe_return, int> wolfe_line_search(
       if (wolfe_ok(mid)) {
         a.swap(a_try);
         theta.swap(theta_try);
+        theta_grad.swap(theta_grad_try);
         obj_init = mid.obj;
         alpha_init = mid.alpha;
         debug::print("Exit on safe on zoom", 1);
-        debug::print("total_updates", total_updates);
-        return std::pair{wolfe_return::PASS, total_updates};
+        debug::print("total_updates", status.num_evals);
+        status.stop = WolfeReturn::Wolfe;
+        status.alpha = mid.alpha;
+        status.obj = mid.obj;
+        status.d_obj = mid.dir;
+        return status;
       } else {
         if (best.obj < mid.obj) {
           best = mid;
@@ -642,21 +704,21 @@ inline std::pair<wolfe_return, int> wolfe_line_search(
       high = mid;
     }
     auto check_bb = check_bounds();
-    if (check_bb.first != wolfe_return::PASS) {
+    if (status.stop != WolfeReturn::Fail) {
       return check_bb;
     }
-
   }
   debug::print("Failed zoom: ", 1, "Failed zoom:", 1, "low.alpha: ", low.alpha,
                "low.obj:   ", low.obj, "deriv_low: ", low.dir,
                "high.alpha:", high.alpha, "high.obj:  ", high.obj,
                "deriv_high:", high.dir);
   // On failure, use the best point we have found so far that at least satisfies armijo
-  update_step(a_try, theta_try, theta_grad, best);
+  update_step(a_try, theta_try, theta_grad_try, best);
   a.swap(a_try);
   theta.swap(theta_try);
-  theta_grad = laplace_likelihood::theta_grad(ll_fun, theta_try, ll_args, msgs);
-  // We already calculated best.obj and theta_grad so no need to recompute here
+//  theta_grad_try = laplace_likelihood::theta_grad(ll_fun, theta_try, ll_args, msgs);
+  // We already calculated best.obj and theta_grad_try so no need to recompute here
+  theta_grad.swap(theta_grad_try);
   best.dir = grad_fun(a, theta, theta_grad).dot(p);
   const bool armijo_ok_mid
       = check_armijo(best.obj, obj_init, best.alpha, dir_deriv_init, opt);
@@ -665,16 +727,28 @@ inline std::pair<wolfe_return, int> wolfe_line_search(
   alpha_init = best.alpha;
   if (armijo_ok_mid && curve_ok_mid) {
     debug::print("Exit on safe after zoom", 1);
-    debug::print("total_updates", total_updates);
-    return std::pair{wolfe_return::PASS, total_updates};
+    debug::print("total_updates", status.num_evals);
+    status.stop = WolfeReturn::Wolfe;
+    status.alpha = best.alpha;
+    status.obj = best.obj;
+    status.d_obj = best.dir;
+    return status;
   } else if (armijo_ok_mid) {
     debug::print("Exit on only satisfying armijo", 1);
-    debug::print("total_updates", total_updates);
-    return std::pair{wolfe_return::ARMIJO_PASS, total_updates};
+    debug::print("total_updates", status.num_evals);
+    status.stop = WolfeReturn::Armijo;
+    status.alpha = best.alpha;
+    status.obj = best.obj;
+    status.d_obj = best.dir;
+    return status;
   } else {
     debug::print("Exit on failure", 1);
-    debug::print("total_updates", total_updates);
-    return std::pair{wolfe_return::FAIL, total_updates};
+    debug::print("total_updates", status.num_evals);
+    status.stop = WolfeReturn::Fail;
+    status.alpha = best.alpha;
+    status.obj = best.obj;
+    status.d_obj = best.dir;
+    return status;
   }
 }
 }

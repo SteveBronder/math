@@ -554,20 +554,23 @@ inline auto laplace_marginal_density_est(
         "theta and likelihood arguments.");
   }
   double step_size = 1.0;
-//  std::cout << "___________\nSTART\n___________" << std::endl;
   // NOTE: theta_grad is updated in `wolfe_line_search`
   auto theta_grad
       = laplace_likelihood::theta_grad(ll_fun, theta, ll_args, msgs);
   Eigen::VectorXd theta_grad_prev = theta_grad;
   int iter = 0;
+  internal::WolfeStatus wolfe_status;
   // Start with low bb
-  int total_updates = 99;
+  wolfe_status.num_backtracks = 99;
+//  std::cout << "{\"problem\" :" << std::endl;
   if (options.solver == 1) {
     if (options.hessian_block_size == 1) {
    //   std::cout << "Solver: 1Diag" << std::endl;
       Eigen::VectorXd W_r(theta_size);
       for (Eigen::Index i = 0; i <= options.max_num_steps; i++) {
-        debug::print("======Iter", iter++);
+ //       std::cout << "{\"Iter\" : " << iter << ", " << std::endl;
+        debug::print("======Iter", iter);
+        iter++;
         auto W = laplace_likelihood::diagonal_hessian(
             ll_fun, theta, ll_args, msgs);
         for (Eigen::Index i = 0; i < W.size(); i++) {
@@ -595,26 +598,37 @@ inline auto laplace_marginal_density_est(
         Eigen::VectorXd p = theta - theta_prev;
         theta_grad = laplace_likelihood::theta_grad(ll_fun, theta, ll_args, msgs);
         step_size = barzilai_borwein_step_size(p, theta_grad, theta_grad_prev,
-                                      step_size, i, options.line_search.min_alpha,
+                                      step_size, wolfe_status.num_backtracks, options.line_search.min_alpha,
                                       options.line_search.max_alpha);
         theta_grad_prev = theta_grad;
         objective_old = objective_new;
-        internal::wolfe_return ok = internal::wolfe_return::FAIL;
-        std::tie(ok, total_updates) = internal::wolfe_line_search(
+        auto save_step = step_size;
+        wolfe_status = internal::wolfe_line_search(
             theta, objective_new, step_size, theta_grad, a, a_prev, ll_fun,
             obj_fun, grad_fun, covariance, ll_args, options, msgs);
         // Check for convergence or if line search failed
+        /*
+        std::cout << "\t{ \"wolfe_status\" : \"" << internal::wolfe_status_str(wolfe_status) << "\", " << std::endl;
+        std::cout << "\t    \"start_step\" : " << save_step << ", " << std::endl;
+        std::cout << "\t      \"end_step\" : " << wolfe_status.alpha << ", " << std::endl;
+        std::cout << "\t     \"num_evals\" : " << wolfe_status.num_evals << ", " << std::endl;
+        std::cout << "\t\"num_backtracks\" : " << wolfe_status.num_backtracks << std::endl;
+        std::cout << "\t},\n}," << std::endl;
+        */
+        step_size = wolfe_status.alpha;
     //    std::cout << "wolfe_return: " << internal::wolfe_return_str(ok) << std::endl;
     //    std::cout << "    Wolfe step:" << step_size << std::endl;
         debug::print("", 1, "Objective old: ", objective_old,
                      "Objective new: ", objective_new,
                      "Step size:      ", step_size);
         if (abs(objective_new - objective_old) < options.tolerance
-            || (ok != wolfe_return::PASS && objective_new == objective_old)) {
+            || (wolfe_status.stop != internal::WolfeReturn::Wolfe &&
+                  objective_new == objective_old)) {
           const double B_log_determinant
               = 2.0 * llt_B.matrixLLT().diagonal().array().log().sum();
           // Overwrite W instead of making a new sparse matrix
           //W.asdiagonal() = W_r;
+//          std::cout << "}\n";
           return laplace_density_estimates{
               objective_new - 0.5 * B_log_determinant,
               std::move(theta),
@@ -677,12 +691,12 @@ inline auto laplace_marginal_density_est(
         // Simple Newton step
         Eigen::VectorXd p = theta - theta_prev;
         step_size = barzilai_borwein_step_size(p, theta_grad, theta_grad_prev,
-                                      step_size, i, options.line_search.min_alpha,
+                                      step_size, wolfe_status.num_backtracks,
+                                      options.line_search.min_alpha,
                                       options.line_search.max_alpha);
         objective_old = objective_new;
         theta_grad_prev = theta_grad;
-        internal::wolfe_return ok = internal::wolfe_return::FAIL;
-        std::tie(ok, total_updates) = internal::wolfe_line_search(
+        wolfe_status = internal::wolfe_line_search(
             theta, objective_new, step_size, theta_grad, a, a_prev, ll_fun,
             obj_fun, grad_fun, covariance, ll_args, options, msgs);
 //        std::cout << "wolfe_return: " << internal::wolfe_return_str(ok) << std::endl;
@@ -692,7 +706,8 @@ inline auto laplace_marginal_density_est(
                      "Step size:      ", step_size);
         // Check for convergence or if line search failed
         if (abs(objective_new - objective_old) < options.tolerance
-            || (ok != wolfe_return::PASS && objective_new == objective_old)) {
+            || (wolfe_status.stop != internal::WolfeReturn::Wolfe &&
+                  objective_new == objective_old)) {
           const double B_log_determinant
               = 2.0 * llt_B.matrixLLT().diagonal().array().log().sum();
           return laplace_density_estimates{
@@ -739,12 +754,11 @@ inline auto laplace_marginal_density_est(
               LT.solve(L.solve(K_root.transpose() * b)));
       Eigen::VectorXd p = theta - theta_prev;
       step_size = barzilai_borwein_step_size(p, theta_grad, theta_grad_prev,
-                                    step_size, i, options.line_search.min_alpha,
+                                    step_size, wolfe_status.num_backtracks, options.line_search.min_alpha,
                                     options.line_search.max_alpha);
       objective_old = objective_new;
       theta_grad_prev = theta_grad;
-      internal::wolfe_return ok = internal::wolfe_return::FAIL;
-      std::tie(ok, total_updates) = internal::wolfe_line_search(
+      wolfe_status = internal::wolfe_line_search(
         theta, objective_new, step_size, theta_grad, a, a_prev, ll_fun,
         obj_fun, grad_fun, covariance, ll_args, options, msgs);
 //        std::cout << "wolfe_return: " << internal::wolfe_return_str(ok) << std::endl;
@@ -754,7 +768,8 @@ inline auto laplace_marginal_density_est(
                    "Objective new: ", objective_new,
                    "Step size:      ", step_size);
       if (abs(objective_new - objective_old) < options.tolerance
-          || (ok != wolfe_return::PASS && objective_new == objective_old)) {
+          || (wolfe_status.stop != internal::WolfeReturn::Wolfe &&
+                objective_new == objective_old)) {
         const double B_log_determinant
             = 2.0 * llt_B.matrixLLT().diagonal().array().log().sum();
         return laplace_density_estimates{
@@ -788,12 +803,11 @@ inline auto laplace_marginal_density_est(
       a.noalias() = b - W * LU.solve(covariance * b);
       Eigen::VectorXd p = theta - theta_prev;
       step_size = barzilai_borwein_step_size(p, theta_grad, theta_grad_prev,
-                                    step_size, i, options.line_search.min_alpha,
+                                    step_size, wolfe_status.num_backtracks, options.line_search.min_alpha,
                                     options.line_search.max_alpha);
       objective_old = objective_new;
       theta_grad_prev = theta_grad;
-      internal::wolfe_return ok = internal::wolfe_return::FAIL;
-      std::tie(ok, total_updates) = internal::wolfe_line_search(
+      wolfe_status = internal::wolfe_line_search(
         theta, objective_new, step_size, theta_grad, a, a_prev, ll_fun,
         obj_fun, grad_fun, covariance, ll_args, options, msgs);
 //        std::cout << "wolfe_return: " << internal::wolfe_return_str(ok) << std::endl;
@@ -803,7 +817,8 @@ inline auto laplace_marginal_density_est(
                    "Step size:      ", step_size);
       // Check for convergence or if line search failed
       if (abs(objective_new - objective_old) < options.tolerance
-          || (ok != wolfe_return::PASS && objective_new == objective_old)) {
+          || (wolfe_status.stop != internal::WolfeReturn::Wolfe &&
+                objective_new == objective_old)) {
         // TODO(Charles): There has to be a simple trick for this
         const double B_log_determinant = log(LU.determinant());
         return laplace_density_estimates{
