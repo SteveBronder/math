@@ -255,10 +255,16 @@ inline Scalar cubic_or_bisect_max(Scalar a, Scalar fa, Scalar fpa,
 template <typename Eval, typename Options>
 inline auto cubic_or_bisect_max(Eval&& low, Eval&& high, Options&& opt) {
   auto alpha = cubic_or_bisect_max(low.alpha, low.obj, low.dir, high.alpha, high.obj, high.dir);
-  alpha
-        = std::clamp(alpha, opt.line_search.min_alpha, high.alpha * 0.9);
-  return alpha;
+  // Keep strictly inside (low.alpha, high.alpha) with a small edge guard.
+  constexpr double guard = static_cast<double>(1e-5);
+  const double left  = low.alpha  + guard * (high.alpha - low.alpha);
+  const double right = high.alpha - guard * (high.alpha - low.alpha);
 
+  if (!(right > left)) {
+    // Bracket collapsed; fall back to midpoint.
+    return (low.alpha + high.alpha) * static_cast<double>(0.5);
+  }
+  return std::clamp(alpha, left, right);
 }
 
 template <typename Option>
@@ -438,7 +444,7 @@ inline auto wolfe_status_str(WolfeStatus s) {
 template <typename F, class Obj, class Grad, typename LLArgs, typename Stream,
           typename Options>
 inline WolfeStatus wolfe_line_search(
-    Eigen::VectorXd& theta, double& obj_init, double& alpha_init,
+    Eigen::VectorXd& theta, Eigen::VectorXd& theta_prev, double& obj_init, double& alpha_init,
     Eigen::VectorXd& theta_grad, Eigen::VectorXd& a,
     const Eigen::VectorXd& a_prev, F&& ll_fun, Obj&& obj_fun, Grad&& grad_fun,
     const Eigen::MatrixXd& covariance, LLArgs&& ll_args, Options&& opt,
@@ -451,7 +457,7 @@ inline WolfeStatus wolfe_line_search(
   WolfeStatus status;
   Eigen::VectorXd p = a - a_prev;
   const Eigen::VectorXd sigma_p = covariance * p;
-  double dir_deriv_init = grad_fun(a_prev, theta, theta_grad).dot(p);
+  double dir_deriv_init = grad_fun(a_prev, theta_prev, theta_grad).dot(p);
 
   auto armijo_ok = [&](const Eval& eval) -> bool {
     return check_armijo(eval.obj, obj_init, eval.alpha, dir_deriv_init, opt);
@@ -461,12 +467,12 @@ inline WolfeStatus wolfe_line_search(
   };
   Eigen::VectorXd theta_grad_try = theta_grad;
   auto update_step
-      = [&p, &status, &a_prev, &covariance, &theta, &sigma_p, &ll_fun,
+      = [&p, &status, &a_prev, &covariance, &theta, &sigma_p, &ll_fun, &theta_prev,
         &ll_args, &obj_fun, &grad_fun, msgs](
           auto& a_in, auto& theta_in, auto& theta_grad_in,
           auto& eval_in) mutable {
           status.num_evals++;
-          theta_in.noalias() = theta + eval_in.alpha * sigma_p;
+          theta_in.noalias() = theta_prev + eval_in.alpha * sigma_p;
           a_in.noalias()     = a_prev + eval_in.alpha * p;
           theta_grad_in
               = laplace_likelihood::theta_grad(ll_fun, theta_in, ll_args, msgs);
@@ -502,6 +508,7 @@ inline WolfeStatus wolfe_line_search(
       if (wolfe_ok(high)) {
         debug::print("Exit on first precheck", 1);
         a.swap(a_try);
+        theta_prev.swap(theta);
         theta.swap(theta_try);
         theta_grad.swap(theta_grad_try);
         obj_init = high.obj;
@@ -560,6 +567,7 @@ inline WolfeStatus wolfe_line_search(
       // [1]
       if (wolfe_ok(high)) {
         a.swap(a_try);
+        theta_prev.swap(theta);
         theta.swap(theta_try);
         theta_grad.swap(theta_grad_try);
         obj_init = high.obj;
@@ -596,6 +604,7 @@ inline WolfeStatus wolfe_line_search(
       if (best.obj != low.obj && armijo_ok(best)) {
        update_step(a_try, theta_try, theta_grad_try, best);
        a.swap(a_try);
+       theta_prev.swap(theta);
        theta.swap(theta_try);
        theta_grad.swap(theta_grad_try);
        obj_init = best.obj;
@@ -648,6 +657,7 @@ inline WolfeStatus wolfe_line_search(
     status.num_backtracks++;
     const double diff_alpha = high.alpha - low.alpha;
     mid.alpha = cubic_or_bisect_max(low, high, opt);
+    
     update_step(a_try, theta_try, theta_grad_try, mid);
     debug::print("Cube: ", 1, "Cube Iter:           ", loop_iter++,
                  "mid.alpha:      ", mid.alpha, "mid.obj:        ", mid.obj,
@@ -674,6 +684,7 @@ inline WolfeStatus wolfe_line_search(
     if (armijo_ok(mid)) {
       if (wolfe_ok(mid)) {
         a.swap(a_try);
+        theta_prev.swap(theta);
         theta.swap(theta_try);
         theta_grad.swap(theta_grad_try);
         obj_init = mid.obj;
@@ -704,7 +715,7 @@ inline WolfeStatus wolfe_line_search(
       high = mid;
     }
     auto check_bb = check_bounds();
-    if (status.stop != WolfeReturn::Fail) {
+    if (check_bb.stop != WolfeReturn::Fail) {
       return check_bb;
     }
   }
@@ -715,6 +726,7 @@ inline WolfeStatus wolfe_line_search(
   // On failure, use the best point we have found so far that at least satisfies armijo
   update_step(a_try, theta_try, theta_grad_try, best);
   a.swap(a_try);
+  theta_prev.swap(theta);
   theta.swap(theta_try);
 //  theta_grad_try = laplace_likelihood::theta_grad(ll_fun, theta_try, ll_args, msgs);
   // We already calculated best.obj and theta_grad_try so no need to recompute here

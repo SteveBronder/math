@@ -600,11 +600,19 @@ inline auto laplace_marginal_density_est(
         step_size = barzilai_borwein_step_size(p, theta_grad, theta_grad_prev,
                                       step_size, wolfe_status.num_backtracks, options.line_search.min_alpha,
                                       options.line_search.max_alpha);
-        theta_grad_prev = theta_grad;
         objective_old = objective_new;
         auto save_step = step_size;
+
+        // --- Ensure the Wolfe baseline α=0 is consistent and correct ---
+        // 1) align θ_prev with a_prev so that θ(α)=Σ a(α) holds along the path
+        theta_prev.noalias() = covariance * a_prev;
+        // 2) pass φ(0) as the baseline objective
+        objective_new = obj_fun(a_prev, theta_prev);
+        // 3) use the gradient at θ_prev for φ'(0)
+        theta_grad = laplace_likelihood::theta_grad(ll_fun, theta_prev, ll_args, msgs);
+
         wolfe_status = internal::wolfe_line_search(
-            theta, objective_new, step_size, theta_grad, a, a_prev, ll_fun,
+            theta, theta_prev, objective_new, step_size, theta_grad, a, a_prev, ll_fun,
             obj_fun, grad_fun, covariance, ll_args, options, msgs);
         // Check for convergence or if line search failed
         /*
@@ -695,9 +703,18 @@ inline auto laplace_marginal_density_est(
                                       options.line_search.min_alpha,
                                       options.line_search.max_alpha);
         objective_old = objective_new;
-        theta_grad_prev = theta_grad;
+        auto save_step = step_size;
+
+        // --- Ensure the Wolfe baseline α=0 is consistent and correct ---
+        // 1) align θ_prev with a_prev so that θ(α)=Σ a(α) holds along the path
+        theta_prev.noalias() = covariance * a_prev;
+        // 2) pass φ(0) as the baseline objective
+        objective_new = obj_fun(a_prev, theta_prev);
+        // 3) use the gradient at θ_prev for φ'(0)
+        theta_grad = laplace_likelihood::theta_grad(ll_fun, theta_prev, ll_args, msgs);
+
         wolfe_status = internal::wolfe_line_search(
-            theta, objective_new, step_size, theta_grad, a, a_prev, ll_fun,
+            theta, theta_prev, objective_new, step_size, theta_grad, a, a_prev, ll_fun,
             obj_fun, grad_fun, covariance, ll_args, options, msgs);
 //        std::cout << "wolfe_return: " << internal::wolfe_return_str(ok) << std::endl;
 //        std::cout << "    Wolfe step:" << step_size << std::endl;
@@ -757,9 +774,18 @@ inline auto laplace_marginal_density_est(
                                     step_size, wolfe_status.num_backtracks, options.line_search.min_alpha,
                                     options.line_search.max_alpha);
       objective_old = objective_new;
-      theta_grad_prev = theta_grad;
+      auto save_step = step_size;
+
+      // --- Ensure the Wolfe baseline α=0 is consistent and correct ---
+      // 1) align θ_prev with a_prev so that θ(α)=Σ a(α) holds along the path
+      theta_prev.noalias() = covariance * a_prev;
+      // 2) pass φ(0) as the baseline objective
+      objective_new = obj_fun(a_prev, theta_prev);
+      // 3) use the gradient at θ_prev for φ'(0)
+      theta_grad = laplace_likelihood::theta_grad(ll_fun, theta_prev, ll_args, msgs);
+
       wolfe_status = internal::wolfe_line_search(
-        theta, objective_new, step_size, theta_grad, a, a_prev, ll_fun,
+        theta, theta_prev, objective_new, step_size, theta_grad, a, a_prev, ll_fun,
         obj_fun, grad_fun, covariance, ll_args, options, msgs);
 //        std::cout << "wolfe_return: " << internal::wolfe_return_str(ok) << std::endl;
 //        std::cout << "    Wolfe step:" << step_size << std::endl;
@@ -805,10 +831,19 @@ inline auto laplace_marginal_density_est(
       step_size = barzilai_borwein_step_size(p, theta_grad, theta_grad_prev,
                                     step_size, wolfe_status.num_backtracks, options.line_search.min_alpha,
                                     options.line_search.max_alpha);
-      objective_old = objective_new;
-      theta_grad_prev = theta_grad;
+        objective_old = objective_new;
+        auto save_step = step_size;
+
+        // --- Ensure the Wolfe baseline α=0 is consistent and correct ---
+        // 1) align θ_prev with a_prev so that θ(α)=Σ a(α) holds along the path
+        theta_prev.noalias() = covariance * a_prev;
+        // 2) pass φ(0) as the baseline objective
+        objective_new = obj_fun(a_prev, theta_prev);
+        // 3) use the gradient at θ_prev for φ'(0)
+        theta_grad = laplace_likelihood::theta_grad(ll_fun, theta_prev, ll_args, msgs);
+
       wolfe_status = internal::wolfe_line_search(
-        theta, objective_new, step_size, theta_grad, a, a_prev, ll_fun,
+        theta, theta_prev, objective_new, step_size, theta_grad, a, a_prev, ll_fun,
         obj_fun, grad_fun, covariance, ll_args, options, msgs);
 //        std::cout << "wolfe_return: " << internal::wolfe_return_str(ok) << std::endl;
 //        std::cout << "    Wolfe step:" << step_size << std::endl;
