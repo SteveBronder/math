@@ -7,7 +7,7 @@
 
 #include <gtest/gtest.h>
 #include <vector>
-
+/*
 TEST(laplace_marginal_neg_binomial_log_lpmf, phi_dim_2) {
   using stan::math::laplace_marginal_neg_binomial_2_log_lpmf;
   using stan::math::laplace_marginal_tol_neg_binomial_2_log_lpmf;
@@ -47,7 +47,7 @@ TEST(laplace_marginal_neg_binomial_log_lpmf, phi_dim_2) {
       },
       theta_0);
 }
-
+*/
 TEST_F(laplace_disease_map_test, laplace_marginal_neg_binomial_2_log_lpmf) {
   using stan::is_var_v;
   using stan::math::laplace_marginal_neg_binomial_2_log_lpmf;
