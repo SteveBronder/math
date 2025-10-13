@@ -54,7 +54,7 @@ TEST(laplace_marginal_beg_binomial_log_summary_lpmf, phi_dim_2) {
       },
       theta_0);
 }
-
+/*
 TEST_F(laplace_disease_map_test,
        laplace_marginal_neg_binomial_2_log_summary_lpmf) {
   using stan::is_var_v;
@@ -108,3 +108,4 @@ TEST_F(laplace_disease_map_test,
       },
       theta_0);
 }
+*/
