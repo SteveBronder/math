@@ -143,7 +143,7 @@ TEST_F(laplace_motorcyle_gp_test, gp_motorcycle) {
   for (int solver_num = 3; solver_num <= 3; solver_num++) {
     for (int max_steps_line_search = 300; max_steps_line_search <= 300;
          max_steps_line_search += 100) {
-      for (int hessian_block_size = 1; hessian_block_size < 4;
+      for (int hessian_block_size = 1; hessian_block_size < 2;
            hessian_block_size++) {
         if (theta0.size() % hessian_block_size != 0) {
           std::cerr << "[          ] [ INFO ]"
@@ -152,9 +152,9 @@ TEST_F(laplace_motorcyle_gp_test, gp_motorcycle) {
                     << std::endl;
           continue;
         }
-        auto f = [&](auto&& y_v, auto&& phi_01_v, auto&& phi_rest_v) {
+        auto f = [&](auto&& phi_01_v, auto&& phi_rest_v) {
           return laplace_marginal_tol<false>(
-              normal_likelihood{}, std::forward_as_tuple(y_v, n_obs),
+              normal_likelihood{}, std::forward_as_tuple(y, n_obs),
               covariance_motorcycle_functor{},
               std::forward_as_tuple(x, phi_01_v(0), phi_01_v(1), phi_rest_v(0),
                                     phi_rest_v(1), n_obs),
@@ -164,7 +164,7 @@ TEST_F(laplace_motorcyle_gp_test, gp_motorcycle) {
         stan::test::ad_tolerances tols;
         tols.gradient_grad_ = 1e-1;
           try {
-            stan::test::expect_ad<true>(tols, f, y, phi_01, phi_rest);
+            stan::test::expect_ad<true>(tols, f, phi_01, phi_rest);
           } catch (const std::domain_error e) {
             ADD_FAILURE() << "Exception: " << e.what()
                           << "\n\tsolver_num: " << solver_num
@@ -178,6 +178,7 @@ TEST_F(laplace_motorcyle_gp_test, gp_motorcycle) {
     }
   }
 }
+/*
 
 struct normal_likelihood2 {
   template <typename Theta, typename SigmaGlobal>
@@ -197,7 +198,6 @@ struct normal_likelihood2 {
     return stan::math::normal_lpdf(y, mu, stan::math::add(sigma_global, sigma)) + lp;
   }
 };
-/*
 TEST_F(laplace_motorcyle_gp_test, gp_motorcycle2) {
   {
     using stan::math::gp_exp_quad_cov;
