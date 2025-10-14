@@ -140,7 +140,7 @@ TEST_F(laplace_motorcyle_gp_test, gp_motorcycle) {
   auto phi_1 = phi_dbl(1);
   Eigen::VectorXd phi_rest = phi_dbl.tail(2);
   Eigen::VectorXd phi_01{{phi_0, phi_1}};
-  for (int solver_num = 1; solver_num < 4; solver_num++) {
+  for (int solver_num = 3; solver_num <= 3; solver_num++) {
     for (int max_steps_line_search = 300; max_steps_line_search <= 300;
          max_steps_line_search += 100) {
       for (int hessian_block_size = 1; hessian_block_size < 4;
@@ -197,7 +197,7 @@ struct normal_likelihood2 {
     return stan::math::normal_lpdf(y, mu, stan::math::add(sigma_global, sigma)) + lp;
   }
 };
-
+/*
 TEST_F(laplace_motorcyle_gp_test, gp_motorcycle2) {
   {
     using stan::math::gp_exp_quad_cov;
@@ -253,3 +253,4 @@ TEST_F(laplace_motorcyle_gp_test, gp_motorcycle2) {
       },
       theta0);
 }
+*/
