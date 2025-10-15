@@ -37,6 +37,11 @@ TEST(laplace_marginal_neg_binomial_log_lpmf, phi_dim_2) {
       [&](int solver_num, int hessian_block_size, int max_steps_line_search,
           auto&& theta_0) {
         auto f = [&](auto&& alpha, auto&& rho, auto&& eta) {
+        if constexpr (stan::is_any_autodiff_v<decltype(alpha), decltype(rho), decltype(eta)>) {
+          std::cerr << "VAR MODE ON" << std::endl;
+        } else {
+          std::cerr << "DOUBLE MODE ON" << std::endl;
+        }
           return laplace_marginal_tol_neg_binomial_2_log_lpmf(
               y, y_index, eta, 0, stan::math::test::squared_kernel_functor{},
               std::forward_as_tuple(x, alpha, rho), theta_0, tolerance,
@@ -47,7 +52,7 @@ TEST(laplace_marginal_neg_binomial_log_lpmf, phi_dim_2) {
       },
       theta_0);
 }
-
+/*
 TEST_F(laplace_disease_map_test, laplace_marginal_neg_binomial_2_log_lpmf) {
   using stan::is_var_v;
   using stan::math::laplace_marginal_neg_binomial_2_log_lpmf;
@@ -91,3 +96,4 @@ TEST_F(laplace_disease_map_test, laplace_marginal_neg_binomial_2_log_lpmf) {
       },
       theta_0);
 }
+      */

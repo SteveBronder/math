@@ -686,13 +686,13 @@ inline WolfeStatus wolfe_line_search(
                "deriv_high:", high.dir);
   // On failure, use the best point we have found so far that at least satisfies armijo
   update_step(scratch.a_, scratch.theta_, curr.theta_grad_, best);
-  const bool armijo_ok_mid = armijo_ok(best);
-  const bool curve_ok_mid = wolfe_ok(best);
   curr.a_.swap(scratch.a_);
   curr.theta_.swap(scratch.theta_);
   curr.theta_grad_ = laplace_likelihood::theta_grad(ll_fun, scratch.theta_, ll_args, msgs);
   // We already calculated best.obj and theta_grad so no need to recompute here
   best.dir = grad_fun(curr.a_, curr.theta_, curr.theta_grad_).dot(p);
+  const bool armijo_ok_mid = armijo_ok(best);
+  const bool curve_ok_mid = wolfe_ok(best);
   curr.obj_ = best.obj;
   curr.alpha_ = best.alpha;
   curr.dir_ = mid.dir;
