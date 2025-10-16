@@ -197,6 +197,7 @@ if constexpr (stan::is_any_autodiff_v<decltype(y_v), decltype(phi_01_v), decltyp
 
   }, theta0);
 }
+/*
 struct normal_likelihood2 {
   template <typename Theta, typename SigmaGlobal>
   auto operator()(const Theta& theta, const Eigen::VectorXd& y,
@@ -215,7 +216,6 @@ struct normal_likelihood2 {
     return stan::math::normal_lpdf(y, mu, stan::math::add(sigma_global, sigma)) + lp;
   }
 };
-
 TEST_F(laplace_motorcyle_gp_test, gp_motorcycle2_val) {
 #ifdef LAPLACE_DEBUG
   stan::math::internal::debug::csv_file << "test: " << "gp_motorcycle_val" << std::endl;
@@ -301,3 +301,4 @@ if constexpr (stan::is_any_autodiff_v<decltype(sigma_global_v), decltype(length_
 }
 
 
+*/
