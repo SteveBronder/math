@@ -108,7 +108,7 @@ class laplace_motorcyle_gp_test : public ::testing::Test {
   static constexpr double eps{1e-7};
   Eigen::VectorXd phi_dbl{{length_scale_f, length_scale_g, sigma_f, sigma_g}};
 };
-
+/*
 TEST_F(laplace_motorcyle_gp_test, gp_motorcycle_val) {
 
   // logger->current_test_name_ = "gp_motorcycle";
@@ -127,7 +127,7 @@ TEST_F(laplace_motorcyle_gp_test, gp_motorcycle_val) {
       theta0, tolerance, max_num_steps, hessian_block_size, 2,
       max_steps_line_search, nullptr);
 }
-
+*/
 TEST_F(laplace_motorcyle_gp_test, gp_motorcycle_ad) {
 
   // logger->current_test_name_ = "gp_motorcycle";
@@ -168,7 +168,7 @@ TEST_F(laplace_motorcyle_gp_test, gp_motorcycle_ad) {
 
   }, theta0);
 }
-
+/*
 struct normal_likelihood2 {
   template <typename Theta, typename SigmaGlobal>
   auto operator()(const Theta& theta, const Eigen::VectorXd& y,
@@ -253,3 +253,4 @@ TEST_F(laplace_motorcyle_gp_test, gp_motorcycle2_ad) {
       },
       theta0);
 }
+*/

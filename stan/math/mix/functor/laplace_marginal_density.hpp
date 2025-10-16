@@ -588,12 +588,15 @@ inline auto laplace_marginal_density_est(
                     * LT.solve(L.solve(W_r.cwiseProduct(covariance * b)));
         // Approximate optimial step size
         Eigen::VectorXd p = curr.theta_ - prev.theta_;
+        curr.theta_ = covariance * curr.a_;
         curr.theta_grad_ = laplace_likelihood::theta_grad(ll_fun, curr.theta_, ll_args, msgs);
-        wolfe_info.curr_.alpha_ = barzilai_borwein_step_size(p, curr.theta_grad_, prev.theta_grad_,
-                                      curr.alpha_, wolfe_status.num_backtracks_, options.line_search.min_alpha,
+        // Approximate optimial step size
+        curr.alpha_ = wolfe_info.curr_.alpha_ = barzilai_borwein_step_size(p,
+          grad_fun(curr.a_, curr.theta_, curr.theta_grad_),
+          grad_fun(prev.a_, prev.theta_, prev.theta_grad_),
+                                      prev.alpha_, wolfe_status.num_backtracks_, options.line_search.min_alpha,
                                       options.line_search.max_alpha);
-        prev.theta_grad_ = curr.theta_grad_;
-        prev.obj_ = curr.obj_;
+
         wolfe_status = internal::wolfe_line_search(
             wolfe_info, ll_fun,
             obj_fun, grad_fun, covariance, ll_args, options.line_search, msgs);
@@ -617,7 +620,7 @@ inline auto laplace_marginal_density_est(
               Eigen::PartialPivLU<Eigen::MatrixXd>{},
               Eigen::MatrixXd(0, 0)};
         } else {
-          prev.a_.swap(curr.a_);
+          prev = curr;
           set_zero_adjoint(ll_args);
           curr.alpha_ = std::clamp(curr.alpha_, 0.0, 4.0);
           // curr.alpha_ = curr.alpha_ < options.line_search.min_alpha * 10000 ?
@@ -663,12 +666,15 @@ inline auto laplace_marginal_density_est(
         b.noalias() = W * curr.theta_ + curr.theta_grad_;
         curr.a_.noalias() = b - W_r * LT.solve(L.solve(W_r * (covariance * b)));
         // Simple Newton step
-        Eigen::VectorXd p = curr.theta_ - prev.theta_;
-        curr.alpha_ = wolfe_info.curr_.alpha_ = barzilai_borwein_step_size(p, curr.theta_grad_, prev.theta_grad_,
-                                      curr.alpha_, wolfe_status.num_backtracks_, options.line_search.min_alpha,
+        Eigen::VectorXd p = curr.a_ - prev.a_;
+        curr.theta_ = covariance * curr.a_;
+        curr.theta_grad_ = laplace_likelihood::theta_grad(ll_fun, curr.theta_, ll_args, msgs);
+        // Approximate optimial step size
+        curr.alpha_ = wolfe_info.curr_.alpha_ = barzilai_borwein_step_size(p,
+          grad_fun(curr.a_, curr.theta_, curr.theta_grad_),
+          grad_fun(prev.a_, prev.theta_, prev.theta_grad_),
+                                      prev.alpha_, wolfe_status.num_backtracks_, options.line_search.min_alpha,
                                       options.line_search.max_alpha);
-        prev.obj_ = curr.obj_;
-        prev.theta_grad_ = curr.theta_grad_;
         wolfe_status = internal::wolfe_line_search(
             wolfe_info, ll_fun,
             obj_fun, grad_fun, covariance, ll_args, options.line_search, msgs);
@@ -691,7 +697,7 @@ inline auto laplace_marginal_density_est(
               Eigen::PartialPivLU<Eigen::MatrixXd>{},
               Eigen::MatrixXd(0, 0)};
         } else {
-          prev.a_.swap(curr.a_);
+          prev = curr;
           set_zero_adjoint(ll_args);
           curr.alpha_ = std::clamp(curr.alpha_, 0.0, 4.0);
         }
@@ -719,12 +725,15 @@ inline auto laplace_marginal_density_est(
       curr.a_.noalias()
           = K_root.transpose().template triangularView<Eigen::Upper>().solve(
               LT.solve(L.solve(K_root.transpose() * b)));
-      Eigen::VectorXd p = curr.theta_ - prev.theta_;
-      curr.alpha_ = wolfe_info.curr_.alpha_ = barzilai_borwein_step_size(p, curr.theta_grad_, prev.theta_grad_,
-                                    curr.alpha_, wolfe_status.num_backtracks_, options.line_search.min_alpha,
+      Eigen::VectorXd p = curr.a_ - prev.a_;
+      curr.theta_ = covariance * curr.a_;
+      curr.theta_grad_ = laplace_likelihood::theta_grad(ll_fun, curr.theta_, ll_args, msgs);
+      // Approximate optimial step size
+      curr.alpha_ = wolfe_info.curr_.alpha_ = barzilai_borwein_step_size(p,
+        grad_fun(curr.a_, curr.theta_, curr.theta_grad_),
+        grad_fun(prev.a_, prev.theta_, prev.theta_grad_),
+                                    prev.alpha_, wolfe_status.num_backtracks_, options.line_search.min_alpha,
                                     options.line_search.max_alpha);
-      prev.obj_ = curr.obj_;
-      prev.theta_grad_ = curr.theta_grad_;
       wolfe_status = internal::wolfe_line_search(
         wolfe_info, ll_fun,
         obj_fun, grad_fun, covariance, ll_args, options.line_search, msgs);
@@ -747,15 +756,17 @@ inline auto laplace_marginal_density_est(
             Eigen::PartialPivLU<Eigen::MatrixXd>{},
             std::move(K_root)};
       } else {
-        prev.a_.swap(curr.a_);
+        prev = curr;
         set_zero_adjoint(ll_args);
         curr.alpha_ = std::clamp(curr.alpha_, 0.0, 4.0);
       }
     }
     throw_overstep(options.max_num_steps);
   } else if (options.solver == 3) {
+    Eigen::SparseMatrix<double> W_prev;
+    Eigen::PartialPivLU<Eigen::MatrixXd> LU_prev;
     for (Eigen::Index i = 0; i <= options.max_num_steps; i++) {
-      debug::print("======Iter", iter++);
+      debug::print("======Iter:", iter++);
       auto W = laplace_likelihood::block_hessian(
           ll_fun, curr.theta_, options.hessian_block_size, ll_args, msgs);
       Eigen::PartialPivLU<Eigen::MatrixXd> LU(
@@ -763,23 +774,44 @@ inline auto laplace_marginal_density_est(
       // L on lower and U on upper triangular
       b.noalias() = W * curr.theta_ + curr.theta_grad_;
       curr.a_.noalias() = b - W * LU.solve(covariance * b);
-      Eigen::VectorXd p = curr.theta_ - prev.theta_;
-      curr.alpha_ = wolfe_info.curr_.alpha_ = barzilai_borwein_step_size(p, curr.theta_grad_, prev.theta_grad_,
-                                    curr.alpha_, wolfe_status.num_backtracks_, options.line_search.min_alpha,
+      Eigen::VectorXd p = curr.a_ - prev.a_;
+      curr.theta_ = covariance * curr.a_;
+      curr.theta_grad_ = laplace_likelihood::theta_grad(ll_fun, curr.theta_, ll_args, msgs);
+      double dir_deriv_init = grad_fun(prev.a_, prev.theta_, prev.theta_grad_).dot(p);
+      if (dir_deriv_init <= 0) {
+        p = -p;
+        dir_deriv_init = -dir_deriv_init;
+      }
+      // Approximate optimial step size
+      curr.alpha_ = barzilai_borwein_step_size(p,
+        grad_fun(curr.a_, curr.theta_, curr.theta_grad_),
+        grad_fun(prev.a_, prev.theta_, prev.theta_grad_),
+                                    prev.alpha_, wolfe_status.num_backtracks_, options.line_search.min_alpha,
                                     options.line_search.max_alpha);
-      prev.obj_ = curr.obj_;
-      prev.theta_grad_ = curr.theta_grad_;
+      debug::print("", 1,
+        "        wolfe: ", iter,
+        "dir_deriv_init:", dir_deriv_init,
+        "  curr.alpha_: ", curr.alpha_,
+        "  prev.alpha_: ", prev.alpha_);
       wolfe_status = internal::wolfe_line_search(
         wolfe_info, ll_fun,
         obj_fun, grad_fun, covariance, ll_args, options.line_search, msgs);
-      curr.alpha_ = wolfe_info.curr_.alpha_;
-      debug::print("", 1, "Objective old: ", prev.obj_,
-                   "Objective new: ", curr.obj_,
-                   "Step size:      ", curr.alpha_);
+      debug::print("", 1,
+        "Wolfe Status:  ", internal::wolfe_status_str(wolfe_status),
+        "Objective old: ", prev.obj_,
+        "Objective new: ", curr.obj_,
+        "Step size:     ", curr.alpha_);
       // Check for convergence or if line search failed
       if (abs(curr.obj_ - prev.obj_) < options.tolerance
           || (wolfe_status.stop_ != WolfeReturn::Wolfe && curr.obj_ == prev.obj_)) {
         // TODO(Charles): There has to be curr.a_ simple trick for this
+        if (wolfe_status.stop_ != WolfeReturn::Wolfe && curr.obj_ == prev.obj_) {
+          curr = prev;
+          W = W_prev;
+          LU = LU_prev;
+          // Recompute wrt ll_args
+          curr.theta_grad_ = laplace_likelihood::theta_grad(ll_fun, curr.theta_, ll_args, msgs);
+        }
         const double B_log_determinant = log(LU.determinant());
         return laplace_density_estimates{
             curr.obj_ - 0.5 * B_log_determinant,
@@ -791,7 +823,9 @@ inline auto laplace_marginal_density_est(
             std::move(LU),
             Eigen::MatrixXd(0, 0)};
       } else {
-        prev.a_.swap(curr.a_);
+        prev = curr;
+        LU_prev = LU;
+        W_prev = W;
         set_zero_adjoint(ll_args);
         curr.alpha_ = std::clamp(curr.alpha_, 0.0, 4.0);
       }
