@@ -545,7 +545,7 @@ inline auto laplace_marginal_density_est(
   auto grad_fun = [&](const Eigen::VectorXd& a_val, auto&& theta_val, auto&& theta_grad) -> Eigen::VectorXd {
     return -covariance * a_val + covariance * theta_grad;
   };
-  prev.obj_ = std::numeric_limits<double>::lowest();
+  prev.obj_ = obj_fun(prev.a_, curr.theta_);
   curr.obj_ = obj_fun(prev.a_, curr.theta_);
   if (!std::isfinite(curr.obj_)) {
 //    std::cout << "FAIL: initial objective: " << curr.obj_ << std::endl;
@@ -554,6 +554,7 @@ inline auto laplace_marginal_density_est(
         "theta and likelihood arguments.");
   }
   curr.alpha_ = 1.0;
+  prev.alpha_ = curr.alpha_;
   curr.theta_grad_ = laplace_likelihood::theta_grad(ll_fun, curr.theta_, ll_args, msgs);
   prev.theta_grad_ = curr.theta_grad_;
   WolfeStatus wolfe_status;
@@ -802,16 +803,16 @@ inline auto laplace_marginal_density_est(
         "Objective new: ", curr.obj_,
         "Step size:     ", curr.alpha_);
       // Check for convergence or if line search failed
-      if (abs(curr.obj_ - prev.obj_) < options.tolerance
-          || (wolfe_status.stop_ != WolfeReturn::Wolfe && curr.obj_ == prev.obj_)) {
+      const bool wolfe_fail = (wolfe_status.stop_ != WolfeReturn::Wolfe && curr.obj_ == prev.obj_);
+      if (abs(curr.obj_ - prev.obj_) < options.tolerance || wolfe_fail) {
         // TODO(Charles): There has to be curr.a_ simple trick for this
-        if (wolfe_status.stop_ != WolfeReturn::Wolfe && curr.obj_ == prev.obj_) {
+        if (wolfe_fail && i > 0) {
           curr = prev;
           W = W_prev;
           LU = LU_prev;
           // Recompute wrt ll_args
-          curr.theta_grad_ = laplace_likelihood::theta_grad(ll_fun, curr.theta_, ll_args, msgs);
         }
+        curr.theta_grad_ = laplace_likelihood::theta_grad(ll_fun, curr.theta_, ll_args, msgs);
         const double B_log_determinant = log(LU.determinant());
         return laplace_density_estimates{
             curr.obj_ - 0.5 * B_log_determinant,

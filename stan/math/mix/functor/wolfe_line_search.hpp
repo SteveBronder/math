@@ -103,6 +103,8 @@ struct laplace_line_search_options {
    * considered insignificant.
    */
   double abs_obj_threshold{1e-12};
+
+  int max_steps_line_search{100};
 };
 namespace internal {
 namespace debug {
@@ -517,8 +519,19 @@ inline WolfeStatus wolfe_line_search(
     // Quick accept if Armijo and Wolfe conditions are satisfied
     if (armijo_ok(high)) {
       if (wolfe_ok(high)) {
+        best = high;
+        while (armijo_ok(high) && wolfe_ok(high)
+               && high.alpha < opt.max_alpha) {
+          best = high;
+          high.alpha = std::min(high.alpha * 2.0, opt.max_alpha);
+          update_step(scratch.a_, scratch.theta_, scratch.theta_grad_, high);
+          debug::print("Expanding: ", 1, "high.alpha: ", high.alpha,
+                       "high.obj:   ", high.obj, "deriv_high: ", high.dir,
+                       "deriv_init: ", dir_deriv_init);
+        }
+        update_step(scratch.a_, scratch.theta_, scratch.theta_grad_, best);
         debug::print("Exit on first precheck", 1);
-        curr.swap(scratch, high);
+        curr.swap(scratch, best);
         debug::print("total_updates", total_updates);
         return WolfeStatus{WolfeReturn::Wolfe, total_updates, 0};
       } else {
@@ -552,6 +565,24 @@ inline WolfeStatus wolfe_line_search(
     num_backtracks++;
     // 1. Evaluate f(α) and g(α)
     update_step(scratch.a_, scratch.theta_, scratch.theta_grad_, high);
+    if (num_backtracks > opt.max_steps_line_search) {
+      if (armijo_ok(high)) {
+        if (wolfe_ok(high)) {
+          curr.swap(scratch, high);
+          debug::print("Exit on max iters but strong-Wolfe ok", 1);
+          debug::print("total_updates", total_updates);
+          return WolfeStatus{WolfeReturn::Wolfe, total_updates, num_backtracks};
+        } else {
+          curr.swap(scratch, high);
+          debug::print("Exit on max iters but Armijo ok", 1);
+          debug::print("total_updates", total_updates);
+          return WolfeStatus{WolfeReturn::Armijo, total_updates, num_backtracks};
+        }
+      }
+      debug::print("Exit on max iters", 1);
+      debug::print("total_updates", total_updates);
+      return WolfeStatus{WolfeReturn::ReachedMaxStep, total_updates, num_backtracks};
+    }
     debug::print("First While", 1, "Second Iter:       ", loop_iter++,
                  "high.alpha: ", high.alpha, "high.obj:   ", high.obj,
                  "deriv_high: ", high.dir, "deriv_init: ", dir_deriv_init,
@@ -568,10 +599,16 @@ inline WolfeStatus wolfe_line_search(
     if (armijo_ok(high)) {
       // [1]
       if (wolfe_ok(high)) {
-        curr.swap(scratch, high);
-        debug::print("Exit on first while", 1);
-        debug::print("total_updates", total_updates);
-        return WolfeStatus{WolfeReturn::Wolfe, total_updates, num_backtracks};
+        if (high.dir > 0) {
+          low = high;
+          high.alpha *= opt.scale_up;
+          continue;
+        } else {
+          curr.swap(scratch, high);
+          debug::print("Exit on first while", 1);
+          debug::print("total_updates", total_updates);
+          return WolfeStatus{WolfeReturn::Wolfe, total_updates, num_backtracks};
+        }
       } else {
         if (best.obj < high.obj) {
           best = high;
@@ -683,7 +720,24 @@ inline WolfeStatus wolfe_line_search(
     } else {
       high = mid;
     }
-
+    if (num_backtracks > opt.max_steps_line_search) {
+      if (armijo_ok(high)) {
+        if (wolfe_ok(high)) {
+          curr.swap(scratch, high);
+          debug::print("Exit on max iters but strong-Wolfe ok", 1);
+          debug::print("total_updates", total_updates);
+          return WolfeStatus{WolfeReturn::Wolfe, total_updates, num_backtracks};
+        } else {
+          curr.swap(scratch, high);
+          debug::print("Exit on max iters but Armijo ok", 1);
+          debug::print("total_updates", total_updates);
+          return WolfeStatus{WolfeReturn::Armijo, total_updates, num_backtracks};
+        }
+      }
+      debug::print("Exit on max iters", 1);
+      debug::print("total_updates", total_updates);
+      return WolfeStatus{WolfeReturn::ReachedMaxStep, total_updates, num_backtracks};
+    }
   }
   debug::print("Failed zoom: ", 1, "Failed zoom:", 1, "low.alpha: ", low.alpha,
                "low.obj:   ", low.obj, "deriv_low: ", low.dir,

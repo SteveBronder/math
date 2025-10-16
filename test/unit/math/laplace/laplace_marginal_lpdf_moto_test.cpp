@@ -87,7 +87,7 @@ class laplace_motorcyle_gp_test : public ::testing::Test {
     // Remark: finds optimal point with or without informed initial guess.
     for (int i = 0; i < n_obs - 1; i++) {
       theta0(2 * i) =  0;
-      theta0(2 * i + 1) = -1.0;
+      theta0(2 * i + 1) = -1;
     }
   }
 
@@ -108,8 +108,11 @@ class laplace_motorcyle_gp_test : public ::testing::Test {
   static constexpr double eps{1e-7};
   Eigen::VectorXd phi_dbl{{length_scale_f, length_scale_g, sigma_f, sigma_g}};
 };
-/*
+
 TEST_F(laplace_motorcyle_gp_test, gp_motorcycle_val) {
+#ifdef LAPLACE_DEBUG
+  stan::math::internal::debug::csv_file << "test: " << "gp_motorcycle_val" << std::endl;
+#endif
 
   // logger->current_test_name_ = "gp_motorcycle";
   using stan::math::laplace_marginal_tol;
@@ -124,17 +127,19 @@ TEST_F(laplace_motorcyle_gp_test, gp_motorcycle_val) {
       covariance_motorcycle_functor{},
       std::forward_as_tuple(x, phi_dbl(0), phi_dbl(1), phi_dbl(2), phi_dbl(3),
                             n_obs),
-      theta0, tolerance, max_num_steps, hessian_block_size, 2,
+      theta0, tolerance, max_num_steps, hessian_block_size, 3,
       max_steps_line_search, nullptr);
 }
-*/
-TEST_F(laplace_motorcyle_gp_test, gp_motorcycle_ad) {
 
+TEST_F(laplace_motorcyle_gp_test, gp_motorcycle_ad) {
+#ifdef LAPLACE_DEBUG
+  stan::math::internal::debug::csv_file << "test: " << "gp_motorcycle_ad" << std::endl;
+#endif
   // logger->current_test_name_ = "gp_motorcycle";
   using stan::math::laplace_marginal_tol;
 
   // TODO(Steve): benchmark this result against GPStuff.
-  constexpr double tolerance = 1e-6;
+  constexpr double tolerance = 1e-8;
   constexpr int max_num_steps = 1000;
   auto phi_0 = phi_dbl(0);
   auto phi_1 = phi_dbl(1);
@@ -146,6 +151,21 @@ TEST_F(laplace_motorcyle_gp_test, gp_motorcycle_ad) {
     [&](int solver_num, int hessian_block_size, int max_steps_line_search,
         auto&& theta_0) {
       auto f = [&](auto&& y_v, auto&& phi_01_v, auto&& phi_rest_v) {
+#ifdef LAPLACE_DEBUG
+if constexpr (stan::is_any_autodiff_v<decltype(y_v), decltype(phi_01_v), decltype(phi_rest_v)>) {
+  if constexpr (stan::is_any_autodiff_v<decltype(y_v)>) {
+    stan::math::internal::debug::csv_file << "y_v: " << "var" << std::endl;
+  }
+  if constexpr (stan::is_any_autodiff_v<decltype(phi_01_v)>) {
+    stan::math::internal::debug::csv_file << "phi_01_v: " << "var" << std::endl;
+  }
+  if constexpr (stan::is_any_autodiff_v<decltype(phi_rest_v)>) {
+    stan::math::internal::debug::csv_file << "phi_rest_v: " << "var" << std::endl;
+  }
+} else {
+  stan::math::internal::debug::csv_file << "double mode: " << "double" << std::endl;
+}
+#endif
         return laplace_marginal_tol<false>(
             normal_likelihood{}, std::forward_as_tuple(y_v, n_obs),
             covariance_motorcycle_functor{},
@@ -163,12 +183,20 @@ TEST_F(laplace_motorcyle_gp_test, gp_motorcycle_ad) {
                         << max_steps_line_search
                         << "\n\thessian_block_size: " << hessian_block_size
                         << std::endl;
-          stan::math::recover_memory();
+#ifdef LAPLACE_DEBUG
+          stan::math::internal::debug::csv_file << "Exception: " << e.what()
+                        << "\n\tsolver_num: " << solver_num
+                        << "\n\tmax_steps_line_search: "
+                        << max_steps_line_search
+                        << "\n\thessian_block_size: " << hessian_block_size
+                        << std::endl;
+#endif
+                        stan::math::recover_memory();
+          throw e;
         }
 
   }, theta0);
 }
-/*
 struct normal_likelihood2 {
   template <typename Theta, typename SigmaGlobal>
   auto operator()(const Theta& theta, const Eigen::VectorXd& y,
@@ -189,6 +217,10 @@ struct normal_likelihood2 {
 };
 
 TEST_F(laplace_motorcyle_gp_test, gp_motorcycle2_val) {
+#ifdef LAPLACE_DEBUG
+  stan::math::internal::debug::csv_file << "test: " << "gp_motorcycle_val" << std::endl;
+#endif
+
   using stan::math::gp_exp_quad_cov;
   using stan::math::value_of;
   Eigen::MatrixXd K_plus_I
@@ -196,10 +228,6 @@ TEST_F(laplace_motorcyle_gp_test, gp_motorcycle2_val) {
         + Eigen::MatrixXd::Identity(n_obs, n_obs);
   Eigen::VectorXd mu_hat = K_plus_I.colPivHouseholderQr().solve(y);
   // Remark: finds optimal point with or without informed initial guess.
-  for (int i = 0; i < n_obs - 1; i++) {
-    theta0(2 * i) =  mu_hat(i);
-    theta0(2 * i + 1) = -1.0;
-  }
   using stan::math::laplace_marginal_tol;
   Eigen::VectorXd length_scale_vec = phi_dbl.head(2);
   Eigen::VectorXd sigma_vec = phi_dbl.tail(2);
@@ -218,6 +246,9 @@ TEST_F(laplace_motorcyle_gp_test, gp_motorcycle2_val) {
 }
 
 TEST_F(laplace_motorcyle_gp_test, gp_motorcycle2_ad) {
+#ifdef LAPLACE_DEBUG
+  stan::math::internal::debug::csv_file << "test: " << "gp_motorcycle_val" << std::endl;
+#endif
   using stan::math::gp_exp_quad_cov;
   using stan::math::value_of;
   using stan::math::laplace_marginal_tol;
@@ -241,6 +272,21 @@ TEST_F(laplace_motorcyle_gp_test, gp_motorcycle2_ad) {
       [&](int solver_num, int hessian_block_size, int max_steps_line_search,
           auto&& theta_0) {
         auto f = [&](auto&& sigma_global_v, auto&& length_scale_v, auto&& sigma_v) {
+#ifdef LAPLACE_DEBUG
+if constexpr (stan::is_any_autodiff_v<decltype(sigma_global_v), decltype(length_scale_v), decltype(sigma_v)>) {
+  if constexpr (stan::is_any_autodiff_v<decltype(sigma_global_v)>) {
+    stan::math::internal::debug::csv_file << "sigma_global: " << "var" << std::endl;
+  }
+  if constexpr (stan::is_any_autodiff_v<decltype(length_scale_v)>) {
+    stan::math::internal::debug::csv_file << "length_scale: " << "var" << std::endl;
+  }
+  if constexpr (stan::is_any_autodiff_v<decltype(sigma_v)>) {
+    stan::math::internal::debug::csv_file << "sigma: " << "var" << std::endl;
+  }
+} else {
+  stan::math::internal::debug::csv_file << "double mode: " << "double" << std::endl;
+}
+#endif
           return laplace_marginal_tol<false>(
               normal_likelihood2{}, std::forward_as_tuple(y, n_obs, sigma_global_v),
               covariance_motorcycle_functor{},
@@ -253,4 +299,5 @@ TEST_F(laplace_motorcyle_gp_test, gp_motorcycle2_ad) {
       },
       theta0);
 }
-*/
+
+
