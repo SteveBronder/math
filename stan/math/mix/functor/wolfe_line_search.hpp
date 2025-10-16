@@ -469,6 +469,10 @@ inline WolfeStatus wolfe_line_search(
   auto& scratch = wolfe_info.scratch_;
   Eigen::VectorXd p = curr.a_ - prev.a_;
   double dir_deriv_init = grad_fun(prev.a_, prev.theta_, prev.theta_grad_).dot(p);
+  if (dir_deriv_init <= 0) {
+    p = -p;
+    dir_deriv_init = -dir_deriv_init;
+  }
   Eval low{0.0, prev.obj_, dir_deriv_init};
   prev.dir_ = dir_deriv_init;
   auto armijo_ok = [&](const Eval& eval) -> bool {
@@ -571,7 +575,7 @@ inline WolfeStatus wolfe_line_search(
           best = high;
         }
         // [2]
-        if (std::signbit(high.dir)) {
+        if (high.dir > 0) {
           low = high;
           high.alpha *= opt.scale_up;
           continue;
